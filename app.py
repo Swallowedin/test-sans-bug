@@ -1,6 +1,6 @@
 import streamlit as st
 import os
-import openai
+from openai import OpenAI
 import json
 import importlib.util
 
@@ -28,7 +28,7 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY n'est pas défini dans les variables d'environnement")
 
-openai.api_key = OPENAI_API_KEY
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 def load_py_module(file_path: str, module_name: str):
     spec = importlib.util.spec_from_file_location(module_name, file_path)
@@ -47,7 +47,7 @@ instructions = instructions_module.get_chatbot_instructions() if instructions_mo
 def get_openai_response(prompt: str, model: str = "gpt-3.5-turbo", num_iterations: int = 5):
     responses = []
     for _ in range(num_iterations):
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": instructions},
@@ -56,7 +56,7 @@ def get_openai_response(prompt: str, model: str = "gpt-3.5-turbo", num_iteration
             temperature=0.5,
             max_tokens=1000
         )
-        content = response.choices[0].message['content'].strip()
+        content = response.choices[0].message.content.strip()
         responses.append(content)
     
     most_common = max(set(responses), key=responses.count)
