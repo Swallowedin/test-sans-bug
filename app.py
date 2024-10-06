@@ -54,7 +54,7 @@ def get_openai_response(prompt: str, model: str = "gpt-3.5-turbo", num_iteration
                 {"role": "user", "content": prompt}
             ],
             temperature=0.5,
-            max_tokens=1000
+            max_tokens=4000
         )
         content = response.choices[0].message.content.strip()
         responses.append(content)
