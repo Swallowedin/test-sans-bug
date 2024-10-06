@@ -1,6 +1,6 @@
 import streamlit as st
 import os
-from openai import OpenAI
+import openai
 import json
 import importlib.util
 
@@ -28,7 +28,7 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY n'est pas défini dans les variables d'environnement")
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+openai.api_key = OPENAI_API_KEY
 
 def load_py_module(file_path: str, module_name: str):
     spec = importlib.util.spec_from_file_location(module_name, file_path)
@@ -47,7 +47,7 @@ instructions = instructions_module.get_chatbot_instructions() if instructions_mo
 def get_openai_response(prompt: str, model: str = "gpt-3.5-turbo", num_iterations: int = 5):
     responses = []
     for _ in range(num_iterations):
-        response = client.chat.completions.create(
+        response = openai.ChatCompletion.create(
             model=model,
             messages=[
                 {"role": "system", "content": instructions},
@@ -56,7 +56,7 @@ def get_openai_response(prompt: str, model: str = "gpt-3.5-turbo", num_iteration
             temperature=0.5,
             max_tokens=1000
         )
-        content = response.choices[0].message.content.strip()
+        content = response.choices[0].message['content'].strip()
         responses.append(content)
     
     most_common = max(set(responses), key=responses.count)
@@ -105,37 +105,17 @@ def calculate_estimate(domaine: str, prestation: str, urgency: str):
     tarif_horaire = tarifs.get("tarif_horaire_standard", 0)
     estimation = heures * tarif_horaire
 
-    calcul_details = [
-        f"Heures estimées: {heures}",
-        f"Tarif horaire standard: {tarif_horaire} €",
-        f"Estimation initiale: {heures} x {tarif_horaire} = {estimation} €"
-    ]
-
     if urgency == "Urgent":
         facteur_urgence = tarifs.get("facteur_urgence", 1.5)
         estimation *= facteur_urgence
-        calcul_details.extend([
-            f"Facteur d'urgence appliqué: x{facteur_urgence}",
-            f"Estimation après urgence: {estimation} €"
-        ])
 
     forfait = tarifs.get("forfaits", {}).get(prestation)
-    if forfait:
-        calcul_details.append(f"Forfait disponible: {forfait} €")
-        if forfait < estimation:
-            estimation = forfait
-            calcul_details.append(f"Forfait appliqué: {forfait} €")
+    if forfait and forfait < estimation:
+        estimation = forfait
 
     estimation_basse, estimation_haute = round(estimation * 0.8), round(estimation * 1.2)
-    calcul_details.append(f"Fourchette d'estimation: {estimation_basse} € - {estimation_haute} €")
 
-    tarifs_utilises = {
-        "tarif_horaire_standard": tarif_horaire,
-        "facteur_urgence": tarifs.get("facteur_urgence") if urgency == "Urgent" else "Non appliqué",
-        "forfait_prestation": forfait if forfait else "Pas de forfait"
-    }
-
-    return estimation_basse, estimation_haute, calcul_details, tarifs_utilises
+    return estimation_basse, estimation_haute
 
 def get_detailed_analysis(question: str, client_type: str, urgency: str, domaine: str, prestation: str):
     prompt = f"""En tant qu'assistant juridique virtuel pour View Avocats, analysez la question suivante et expliquez votre raisonnement pour le choix du domaine juridique et de la prestation.
@@ -146,45 +126,10 @@ Degré d'urgence : {urgency}
 Domaine recommandé : {domaine}
 Prestation recommandée : {prestation}
 
-Structurez votre réponse en trois parties clairement séparées par des lignes vides :
+Fournissez une analyse concise mais détaillée du cas, en tenant compte du type de client et du degré d'urgence."""
 
-1. Analyse détaillée :
-Fournissez une analyse concise mais détaillée du cas, en tenant compte du type de client et du degré d'urgence.
-
-2. Éléments spécifiques utilisés (format JSON strict) :
-{{"domaine": {{"nom": "nom_du_domaine", "description": "description_du_domaine"}}, "prestation": {{"nom": "nom_de_la_prestation", "description": "description_de_la_prestation"}}}}
-
-3. Sources d'information :
-Listez les sources d'information utilisées pour cette analyse, si applicable.
-
-Assurez-vous que chaque partie est clairement séparée et que le JSON dans la partie 2 est valide et strict."""
-
-    response, _ = get_openai_response(prompt)
-
-    parts = response.split('\n\n')
-    
-    analysis = parts[0] if len(parts) > 0 else "Analyse non disponible."
-    
-    elements_used = {}
-    if len(parts) > 1:
-        json_part = next((part for part in parts if '{' in part and '}' in part), None)
-        if json_part:
-            json_str = json_part[json_part.index('{'):json_part.rindex('}')+1]
-            elements_used = json.loads(json_str)
-        else:
-            elements_used = {
-                "domaine": {"nom": domaine, "description": "Information non fournie par l'API"},
-                "prestation": {"nom": prestation, "description": "Information non fournie par l'API"}
-            }
-    else:
-        elements_used = {
-            "domaine": {"nom": domaine, "description": "Information non disponible"},
-            "prestation": {"nom": prestation, "description": "Information non disponible"}
-        }
-    
-    sources = parts[2] if len(parts) > 2 else "Aucune source spécifique mentionnée."
-
-    return analysis, elements_used, sources
+    analysis, _ = get_openai_response(prompt)
+    return analysis
 
 def main():
     apply_custom_css()
@@ -222,8 +167,8 @@ def main():
                 st.info("Malgré cela, nous allons tenter de vous fournir une réponse, mais veuillez noter que notre analyse pourrait ne pas être entièrement adaptée à votre situation.")
 
             if is_relevant or not is_legal:
-                estimation_basse, estimation_haute, calcul_details, tarifs_utilises = calculate_estimate(domaine, prestation, urgency)
-                detailed_analysis, elements_used, sources = get_detailed_analysis(question, client_type, urgency, domaine, prestation)
+                estimation_basse, estimation_haute = calculate_estimate(domaine, prestation, urgency)
+                detailed_analysis = get_detailed_analysis(question, client_type, urgency, domaine, prestation)
 
                 st.success("Analyse terminée. Voici les résultats :")
                 
@@ -231,34 +176,13 @@ def main():
                 st.progress(confidence)
                 st.write(f"Confiance : {confidence:.2%}")
 
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.subheader("Résumé de l'estimation")
-                    st.write(f"**Domaine juridique :** {domaine if domaine else 'Non déterminé'}")
-                    st.write(f"**Prestation :** {prestation if prestation else 'Non déterminée'}")
-                    st.write(f"**Estimation :** Entre {estimation_basse} €HT et {estimation_haute} €HT")
-                    
-                    st.subheader("Détails du calcul")
-                    for detail in calcul_details:
-                        st.write(detail)
-
-                with col2:
-                    st.subheader("Éléments tarifaires utilisés")
-                    st.json(tarifs_utilises)
-
-                    st.subheader("Éléments spécifiques pris en compte")
-                    if isinstance(elements_used, dict) and "domaine" in elements_used and "prestation" in elements_used:
-                        st.json(elements_used)
-                    else:
-                        st.warning("Les éléments spécifiques n'ont pas pu être analysés de manière optimale.")
-                        st.json(elements_used)
+                st.subheader("Résumé de l'estimation")
+                st.write(f"**Domaine juridique :** {domaine if domaine else 'Non déterminé'}")
+                st.write(f"**Prestation :** {prestation if prestation else 'Non déterminée'}")
+                st.write(f"**Estimation :** Entre {estimation_basse} €HT et {estimation_haute} €HT")
 
                 st.subheader("Analyse détaillée")
                 st.write(detailed_analysis)
-
-                if sources and sources != "Aucune source spécifique mentionnée.":
-                    st.subheader("Sources d'information")
-                    st.write(sources)
 
                 st.markdown("---")
                 st.markdown("### 💡 Alternative Recommandée")
